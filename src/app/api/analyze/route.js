@@ -15,7 +15,7 @@ async function runWithSearch(apiKey, prompt) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 2000,
+        max_tokens: 3000,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         messages,
       }),
@@ -50,6 +50,14 @@ async function runWithSearch(apiKey, prompt) {
   throw new Error("Too many iterations");
 }
 
+function extractJSON(raw) {
+  let text = raw.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("No JSON object found in response");
+  return JSON.parse(text.slice(start, end + 1));
+}
+
 export async function POST(req) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
@@ -65,21 +73,13 @@ export async function POST(req) {
 
   const prompt = `Search the web for live current data on ${commodity.label} (${commodity.symbol}) commodity as of today ${TODAY}. Find the current spot price, today's price change, recent news from the past 48 hours, and technical analysis.
 
-Then respond with ONLY this JSON, no markdown, no extra text:
+After searching, respond with ONLY a JSON object. Start your response with { and end with }. No other text, no markdown.
 
 {"price":"current live price","change_today":"today change %","change_week":"weekly change %","market_sentiment":"bullish or bearish or neutral","key_factors":["factor 1","factor 2","factor 3"],"trend":"uptrend or downtrend or sideways","signal":"BUY or SELL or HOLD","confidence":"High or Medium or Low","support_level":"support price","resistance_level":"resistance price","rsi_estimate":"RSI and meaning","catalysts":["event 1","event 2"],"analysis_summary":"3-4 sentence thesis based on live data","risk_factors":["risk 1","risk 2"],"news":[{"headline":"real headline","summary":"what happened","impact":"bullish or bearish or neutral","impact_reason":"why it matters","source":"publication","time_ago":"e.g. 2 hours ago"},{"headline":"headline 2","summary":"summary","impact":"bullish or bearish or neutral","impact_reason":"reason","source":"publication","time_ago":"timeframe"},{"headline":"headline 3","summary":"summary","impact":"bullish or bearish or neutral","impact_reason":"reason","source":"publication","time_ago":"timeframe"},{"headline":"headline 4","summary":"summary","impact":"bullish or bearish or neutral","impact_reason":"reason","source":"publication","time_ago":"timeframe"}]}`;
 
   try {
     const raw = await runWithSearch(apiKey, prompt);
-    const stripped = raw.replace(/^```[a-z]*\n?/gim, "").replace(/\n?```$/gim, "").trim();
-    let parsed;
-    try {
-      parsed = JSON.parse(stripped);
-    } catch {
-      const match = stripped.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("Could not parse response");
-      parsed = JSON.parse(match[0]);
-    }
+    const parsed = extractJSON(raw);
     return NextResponse.json(parsed);
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
